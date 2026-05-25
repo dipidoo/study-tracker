@@ -7,8 +7,8 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const yaml = require('js-yaml');
 
-const AGENT_PD = process.argv[2] ?? 'C:\\Users\\pradiphe\\src\\Agent.PD';
-const TRACKS_DIR = join(AGENT_PD, 'learning', 'tracker', 'tracks');
+const AGENT_PD = process.argv[2] ?? 'C:\\Users\\pradiphe\\src\\study-tracker-content';
+const TRACKS_DIR = join(AGENT_PD, 'tracks');
 
 const files = readdirSync(TRACKS_DIR).filter((n) => /\.ya?ml$/.test(n) && !n.startsWith('_'));
 const tracks = [];

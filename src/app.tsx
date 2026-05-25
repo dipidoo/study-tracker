@@ -41,7 +41,6 @@ export function App() {
     return (
       <div class="root">
         <header><h1>study-tracker</h1></header>
-        <p>Public viewer for doctoral self-study progress. Shares the GitHub OAuth App with anki-client.</p>
         <button onClick={async () => { const cfg = await loadConfig(); authorize(cfg); }}>sign in with GitHub</button>
         <details style={{ marginTop: '1rem' }}>
           <summary class="dim">or paste a personal access token</summary>
