@@ -100,67 +100,83 @@ function mapOptions<T extends string>(
   return out;
 }
 
-export async function listProgress(token: string, meta: ProjectMeta): Promise<ProgressRecord[]> {
-  const data = await ghGraphQL<{
-    node: {
-      items: {
-        nodes: Array<{
-          id: string;
-          content?: { body?: string };
-          fieldValues: {
-            nodes: Array<{
-              field?: { id: string; name?: string };
-              text?: string;
-              date?: string;
-              name?: string;
-              number?: number;
-            }>;
-          };
-        }>;
-      };
+interface ProgressItemsPage {
+  node: {
+    items: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      nodes: Array<{
+        id: string;
+        content?: { body?: string };
+        fieldValues: {
+          nodes: Array<{
+            field?: { id: string; name?: string };
+            text?: string;
+            date?: string;
+            name?: string;
+            number?: number;
+          }>;
+        };
+      }>;
     };
-  }>(
-    token,
-    `query($id: ID!) {
-       node(id: $id) {
-         ... on ProjectV2 {
-           items(first: 200) {
-             nodes {
-               id
-               content { ... on DraftIssue { body } }
-               fieldValues(first: 30) {
-                 nodes {
-                   ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { id name } } }
-                   ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { id name } } }
-                   ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { id name } } }
-                   ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { id name } } }
+  };
+}
+
+export async function listProgress(token: string, meta: ProjectMeta): Promise<ProgressRecord[]> {
+  const out: ProgressRecord[] = [];
+  let cursor: string | null = null;
+  while (true) {
+    const data: ProgressItemsPage = await ghGraphQL<ProgressItemsPage>(
+      token,
+      `query($id: ID!, $cursor: String) {
+         node(id: $id) {
+           ... on ProjectV2 {
+             items(first: 100, after: $cursor) {
+               pageInfo { hasNextPage endCursor }
+               nodes {
+                 id
+                 content { ... on DraftIssue { body } }
+                 fieldValues(first: 20) {
+                   nodes {
+                     ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { id name } } }
+                     ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { id name } } }
+                     ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { id name } } }
+                     ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { id name } } }
+                   }
                  }
                }
              }
            }
          }
-       }
-     }`,
-    { id: meta.projectId },
-  );
-  const out: ProgressRecord[] = [];
-  for (const item of data.node.items.nodes) {
-    const byField = (name: string) => item.fieldValues.nodes.find((v) => v.field?.name === name);
-    const unitIdVal = byField('UnitId')?.text;
-    if (!unitIdVal) continue;
-    out.push({
-      itemId: item.id,
-      unitId: unitIdVal,
-      status: (byField('Status')?.name?.toLowerCase() as UnitStatus) ?? 'not-started',
-      confidence: byField('Confidence')?.name?.toLowerCase() as Confidence | undefined,
-      minutesSpent: byField('MinutesSpent')?.number,
-      completedAt: byField('CompletedAt')?.date,
-      notes: item.content?.body,
-    });
+       }`,
+      { id: meta.projectId, cursor },
+    );
+    for (const item of data.node.items.nodes) {
+      const byField = (name: string) =>
+        item.fieldValues.nodes.find((v: { field?: { name?: string } }) => v.field?.name === name);
+      const unitIdVal = byField('UnitId')?.text;
+      if (!unitIdVal) continue;
+      out.push({
+        itemId: item.id,
+        unitId: unitIdVal,
+        status: (byField('Status')?.name?.toLowerCase() as UnitStatus) ?? 'not-started',
+        confidence: byField('Confidence')?.name?.toLowerCase() as Confidence | undefined,
+        minutesSpent: byField('MinutesSpent')?.number,
+        completedAt: byField('CompletedAt')?.date,
+        notes: item.content?.body,
+      });
+    }
+    if (!data.node.items.pageInfo.hasNextPage) break;
+    cursor = data.node.items.pageInfo.endCursor;
   }
   return out;
 }
 
+/**
+ * Create-or-update a progress item. The caller passes `existingItemId` from
+ * its in-memory cache when the item is already known; the function NEVER
+ * scans the board to look up an id. Returns the patched record so the caller
+ * can update its cache without a full refetch.
+ */
 export async function upsertProgress(
   token: string,
   meta: ProjectMeta,
@@ -168,9 +184,9 @@ export async function upsertProgress(
   courseCode: string,
   title: string,
   patch: Partial<ProgressRecord>,
-): Promise<string> {
-  const all = await listProgress(token, meta);
-  let itemId = all.find((r) => r.unitId === unitId)?.itemId;
+  existingItemId?: string,
+): Promise<ProgressRecord> {
+  let itemId = existingItemId;
   if (!itemId) {
     const created = await ghGraphQL<{ addProjectV2DraftIssue: { projectItem: { id: string } } }>(
       token,
@@ -203,7 +219,15 @@ export async function upsertProgress(
   if (patch.completedAt) {
     await setDate(token, meta.projectId, itemId, meta.fields.completedAt, patch.completedAt);
   }
-  return itemId;
+  return {
+    itemId,
+    unitId,
+    status: patch.status ?? 'in-progress',
+    confidence: patch.confidence,
+    minutesSpent: patch.minutesSpent,
+    completedAt: patch.completedAt,
+    notes: patch.notes,
+  };
 }
 
 async function setText(token: string, projectId: string, itemId: string, fieldId: string, value: string) {

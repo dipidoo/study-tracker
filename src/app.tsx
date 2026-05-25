@@ -84,10 +84,11 @@ export function App() {
           state={state}
           trackId={selectedTrack}
           onBack={() => setView('dashboard')}
-          onUpdate={async () => {
-            if (!state.meta) return;
-            const fresh = await listProgress(state.token, state.meta);
-            setState({ ...state, progress: fresh });
+          onApplyPatch={(updated) => {
+            // Merge the patched record into local progress cache without refetching the board.
+            const next = state.progress.filter((r) => r.itemId !== updated.itemId);
+            next.push(updated);
+            setState({ ...state, progress: next });
           }}
         />
       )}
@@ -169,12 +170,12 @@ function TrackDetail({
   state,
   trackId,
   onBack,
-  onUpdate,
+  onApplyPatch,
 }: {
   state: AppState;
   trackId: string;
   onBack: () => void;
-  onUpdate: () => Promise<void>;
+  onApplyPatch: (updated: ProgressRecord) => void;
 }) {
   const track = state.tracks.find((t) => t.id === trackId);
   if (!track) return <p>not found <button onClick={onBack}>back</button></p>;
@@ -217,7 +218,7 @@ function TrackDetail({
                         return;
                       }
                       const checked = (e.currentTarget as HTMLInputElement).checked;
-                      await upsertProgress(
+                      const updated = await upsertProgress(
                         state.token,
                         state.meta,
                         item.id,
@@ -227,8 +228,9 @@ function TrackDetail({
                           status: checked ? 'completed' : 'in-progress',
                           completedAt: checked ? new Date().toISOString().slice(0, 10) : undefined,
                         },
+                        rec?.itemId, // pass cached itemId if known — no board scan
                       );
-                      await onUpdate();
+                      onApplyPatch(updated);
                     }}
                   />
                   <span class={`kind kind-${item.kind}`}>{item.kind}</span>
