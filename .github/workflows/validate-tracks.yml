@@ -1,0 +1,45 @@
+# Validate track YAML files in Agent.PD on PR / push.
+# Runs the local parser smoke-test against a checkout of Agent.PD.
+#
+# This workflow is informational only — the tracker repo doesn't ship track
+# content. The actual tracks live in dipidoo/Agent.PD. To enable end-to-end
+# validation on PRs to this repo, the workflow checks out Agent.PD using a
+# fine-grained PAT secret (CONTENT_REPO_PAT) and runs the smoke-test.
+#
+# If CONTENT_REPO_PAT is not configured, the workflow silently skips —
+# the only thing that actually matters for deployment is the build step
+# in pages.yml.
+name: Validate tracks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip if no PAT
+        id: gate
+        run: |
+          if [ -z "${{ secrets.CONTENT_REPO_PAT }}" ]; then
+            echo "No CONTENT_REPO_PAT secret; skipping track validation."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: dipidoo/Agent.PD
+          token: ${{ secrets.CONTENT_REPO_PAT }}
+          path: agent-pd
+      - if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - if: steps.gate.outputs.skip != 'true'
+        run: npm ci
+      - if: steps.gate.outputs.skip != 'true'
+        run: node scripts/test-parsers.mjs "$PWD/agent-pd"

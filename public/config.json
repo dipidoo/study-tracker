@@ -1,0 +1,13 @@
+{
+  "_comment": "Shares the GitHub OAuth App + OCF proxy with anki-client. See Agent.PD/learning/tracker/SYNC-DESIGN.md.",
+  "oauthClientId": "Ov23liNeYzb2SRSZLynD",
+  "scopes": ["repo", "project"],
+  "projectPrefix": "study-tracker/",
+  "proxyUrl": "https://www.ocf.berkeley.edu/~dip/anki-oauth/",
+  "contentSource": {
+    "owner": "",
+    "repo": "Agent.PD",
+    "branch": "main",
+    "tracksPath": "learning/tracker/tracks"
+  }
+}
