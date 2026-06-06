@@ -14,12 +14,19 @@ export type ItemKind =
   | 'course-module'
   | 'other';
 
+// What the user will hit before reaching the content, shown as a pre-click badge.
+//   signin  — free to view but requires an account / login (e.g. Coursera)
+//   paywall — the content itself is paid / behind a paywall
+//   index   — link opens a course/landing page; navigate to find this item
+export type AccessKind = 'signin' | 'paywall' | 'index';
+
 export interface TrackItem {
   id: string;
   kind: ItemKind;
   title: string;
   section?: string;
   url?: string;
+  access?: AccessKind;
   duration?: string;
   pages?: string;
   notes?: string;

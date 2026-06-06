@@ -130,6 +130,19 @@ ul.items .duration { font-size: 0.8rem; text-align: right; font-family: ui-monos
 .kind-course-module { background: #ede9fe; color: #5b21b6; }
 .kind-lecture-notes { background: #cffafe; color: #155e75; }
 
+/* Access-expectation badges — what you'll hit before reaching the content */
+.access {
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.access-signin { background: #fef3c7; color: #92400e; }
+.access-paywall { background: #fee2e2; color: #b91c1c; }
+.access-index { background: #e0e7ff; color: #3730a3; }
+
 .past { color: #9ca3af; text-decoration: line-through; }
 .dim { color: #9ca3af; font-size: 0.85rem; }
 .err { color: #b91c1c; background: #fef2f2; padding: 0.75rem; border-radius: 0.375rem; }

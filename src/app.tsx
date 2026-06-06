@@ -6,6 +6,18 @@ import { findProjectByTitle, listProgress, type ProgressRecord, type ProjectMeta
 
 type View = 'dashboard' | 'track' | 'settings';
 
+// Pre-click access labels (see AccessKind in tracks.ts).
+const ACCESS_LABEL: Record<string, string> = {
+  signin: 'sign-in',
+  paywall: 'paywall',
+  index: 'find on page',
+};
+const ACCESS_HINT: Record<string, string> = {
+  signin: 'Free to view, but you must sign in or create an account first',
+  paywall: 'Paid — the content is behind a paywall',
+  index: 'Opens a course/landing page — scroll or click through to reach this specific item',
+};
+
 interface AppState {
   config: AppConfig;
   token: string;
@@ -239,6 +251,9 @@ function TrackDetail({
                       <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
                     ) : (
                       item.title
+                    )}
+                    {item.access && ACCESS_LABEL[item.access] && (
+                      <> <span class={`access access-${item.access}`} title={ACCESS_HINT[item.access]}>{ACCESS_LABEL[item.access]}</span></>
                     )}
                     {item.notes && <><br /><span class="dim">{item.notes}</span></>}
                   </span>
