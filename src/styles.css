@@ -136,3 +136,81 @@ ul.items .duration { font-size: 0.8rem; text-align: right; font-family: ui-monos
 .warn { color: #92400e; background: #fef3c7; padding: 0.75rem; border-radius: 0.375rem; }
 
 code.big { font-size: 1.5rem; background: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 0.375rem; }
+
+/* ============================================================
+   Mobile / narrow viewports (phones, e.g. iPhone portrait)
+   The desktop grids use fixed-width columns (progress bar 220px,
+   kind badge 110px, etc.) that overflow a phone screen. Below
+   ~640px we restructure the dense rows into stacked, tappable
+   layouts and let the header wrap.
+   ============================================================ */
+@media (max-width: 640px) {
+  .root { padding: 1rem 0.9rem; }
+
+  /* Long unbroken titles / URLs must not force horizontal scroll */
+  h2, h3, .title, .item-title, .item-title a { overflow-wrap: anywhere; }
+
+  /* Header: stack the title and let the nav wrap with bigger targets */
+  header {
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+  }
+  header h1 { flex: 1 1 auto; font-size: 1.15rem; }
+  header nav {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  header nav .who {
+    order: -1;            /* show viewer first, above the action buttons */
+    width: 100%;
+    margin: 0;
+  }
+  button { padding: 0.55rem 0.85rem; min-height: 44px; }
+  input[type="password"], input[type="text"] { min-height: 44px; }
+
+  /* Tracks: priority + title + count on the first row, full-width
+     progress bar on its own row underneath. */
+  ul.tracks .track-row {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "pri title count"
+      "bar bar   bar";
+    column-gap: 0.6rem;
+    row-gap: 0.5rem;
+    padding: 0.7rem 0.4rem;
+  }
+  ul.tracks .track-row .priority { grid-area: pri; align-self: start; }
+  ul.tracks .track-row .title    { grid-area: title; }
+  ul.tracks .track-row .count    { grid-area: count; align-self: start; }
+  ul.tracks .track-row .bar      { grid-area: bar; height: 10px; }
+
+  /* Items: checkbox + title on the first row, kind chip + duration
+     tucked on a second row so the title gets the full width. */
+  ul.items .item {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "chk title title"
+      "chk meta  dur";
+    column-gap: 0.6rem;
+    row-gap: 0.25rem;
+    align-items: start;
+    padding: 0.6rem 0;
+  }
+  ul.items .item > input[type="checkbox"] {
+    grid-area: chk;
+    width: 22px;
+    height: 22px;
+    margin-top: 0.15rem;
+    accent-color: #2563eb;
+  }
+  ul.items .item .item-title { grid-area: title; }
+  ul.items .item .kind       { grid-area: meta; justify-self: start; }
+  ul.items .item .duration   { grid-area: dur; align-self: center; }
+
+  /* Legacy dense lists (courses / units) — let them wrap too */
+  ul.courses .course { grid-template-columns: auto 1fr auto; }
+  ul.courses .course .bar { grid-column: 1 / -1; }
+  ul.units li { grid-template-columns: auto 1fr; }
+}
