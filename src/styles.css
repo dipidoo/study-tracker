@@ -143,6 +143,38 @@ ul.items .duration { font-size: 0.8rem; text-align: right; font-family: ui-monos
 .access-paywall { background: #fee2e2; color: #b91c1c; }
 .access-index { background: #e0e7ff; color: #3730a3; }
 
+/* Video resume controls — saved YouTube timestamp + the "set resume point" button */
+.resume-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+.resume-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-decoration: none;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  padding: 0.05rem 0.45rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+.resume-chip:hover { background: #d1fae5; }
+.resume-btn {
+  font-size: 0.72rem;
+  min-height: 0;
+  padding: 0.2rem 0.55rem;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+.resume-btn:hover { background: #e5e7eb; }
+
 .past { color: #9ca3af; text-decoration: line-through; }
 .dim { color: #9ca3af; font-size: 0.85rem; }
 .err { color: #b91c1c; background: #fef2f2; padding: 0.75rem; border-radius: 0.375rem; }
@@ -221,6 +253,11 @@ code.big { font-size: 1.5rem; background: #f3f4f6; padding: 0.25rem 0.5rem; bord
   ul.items .item .item-title { grid-area: title; }
   ul.items .item .kind       { grid-area: meta; justify-self: start; }
   ul.items .item .duration   { grid-area: dur; align-self: center; }
+
+  /* Roomier resume controls for touch */
+  .resume-row { gap: 0.5rem; margin-top: 0.35rem; }
+  .resume-btn { min-height: 34px; padding: 0.35rem 0.7rem; }
+  .resume-chip { padding: 0.25rem 0.55rem; }
 
   /* Legacy dense lists (courses / units) — let them wrap too */
   ul.courses .course { grid-template-columns: auto 1fr auto; }

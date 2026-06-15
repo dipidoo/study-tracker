@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { authorize, clearToken, getToken, handleCallback, setToken, verifyToken } from './auth';
 import { loadConfig, resolveConfig, type AppConfig } from './config';
 import { loadTracks, type Track, type TrackItem } from './tracks';
-import { findProjectByTitle, listProgress, type ProgressRecord, type ProjectMeta, upsertProgress } from './progress';
+import { findProjectByTitle, getDraftContentId, listProgress, type ProgressRecord, type ProjectMeta, saveResumePoint, upsertProgress } from './progress';
 
 type View = 'dashboard' | 'track' | 'settings';
 
@@ -17,6 +17,57 @@ const ACCESS_HINT: Record<string, string> = {
   paywall: 'Paid — the content is behind a paywall',
   index: 'Opens a course/landing page — scroll or click through to reach this specific item',
 };
+
+// ---- Video resume helpers ----
+// A YouTube "copy link at current time" looks like
+//   https://youtu.be/<id>?t=754   or   https://www.youtube.com/watch?v=<id>&t=754s
+function extractVideoId(url?: string): string | undefined {
+  if (!url) return undefined;
+  const m =
+    url.match(/[?&]v=([A-Za-z0-9_-]{11})/) ||
+    url.match(/(?:youtu\.be|\/live|\/embed|\/shorts)\/([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : undefined;
+}
+
+function parseTimeToken(tok: string): number | null {
+  if (/^\d+s?$/.test(tok)) return parseInt(tok, 10);
+  const m = tok.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+  if (!m || (!m[1] && !m[2] && !m[3])) return null;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+}
+
+// Parse a clipboard string → { videoId?, seconds }. Returns null if no timestamp present.
+function parseClipboardTimestamp(text: string): { videoId?: string; seconds: number } | null {
+  if (!text) return null;
+  const t = text.match(/[?&](?:t|start)=([0-9hms]+)/i);
+  if (!t) return null;
+  const seconds = parseTimeToken(t[1]);
+  if (seconds == null) return null;
+  return { videoId: extractVideoId(text), seconds };
+}
+
+// Append/replace the YouTube resume time on a URL, preserving list & index params.
+function withTimestamp(url: string, seconds: number): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('t');
+    u.searchParams.delete('start');
+    u.searchParams.set('t', `${seconds}s`);
+    return u.toString();
+  } catch {
+    const base = url.replace(/([?&])(?:t|start)=[^&]*/gi, '$1').replace(/[?&]$/, '');
+    return base + (base.includes('?') ? '&' : '?') + `t=${seconds}s`;
+  }
+}
+
+function fmtTime(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
 
 interface AppState {
   config: AppConfig;
@@ -205,6 +256,67 @@ function TrackDetail({
     grouped.get(sec)!.push(item);
   }
 
+  // Read a YouTube "copy link at current time" from the clipboard and save it as the resume point.
+  async function setResume(item: TrackItem) {
+    if (!track || !item.url) return;
+    let text = '';
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      alert('Could not read the clipboard. On the video use "Share → Copy" with the start time checked, then tap "set resume point" again.');
+      return;
+    }
+    const parsed = parseClipboardTimestamp(text);
+    if (!parsed) {
+      alert('No timestamp found in the clipboard. On YouTube, tick "Start at" in the Share dialog (or right-click the video → "Copy video URL at current time"), then tap "set resume point" again.');
+      return;
+    }
+    const vid = extractVideoId(item.url);
+    if (vid && parsed.videoId && vid !== parsed.videoId) {
+      if (!confirm('The clipboard link is a different video than this item. Save the timestamp here anyway?')) return;
+    }
+    if (!state.meta) {
+      alert(`ProjectV2 board "${state.config.projectPrefix}progress" not found. Create it first to save progress.`);
+      return;
+    }
+    const rec = byItem.get(item.id);
+    try {
+      let itemId = rec?.itemId;
+      let contentId = rec?.contentId;
+      if (!itemId) {
+        const ensured = await upsertProgress(
+          state.token,
+          state.meta,
+          item.id,
+          track.id,
+          `${track.id} :: ${item.title}`,
+          { status: 'in-progress' },
+        );
+        itemId = ensured.itemId;
+        contentId = ensured.contentId;
+      }
+      if (!contentId) contentId = await getDraftContentId(state.token, itemId);
+      if (!contentId) {
+        alert('Could not locate the progress record to save into.');
+        return;
+      }
+      const newBody = await saveResumePoint(state.token, contentId, parsed.seconds, rec?.notes);
+      onApplyPatch({
+        itemId,
+        unitId: item.id,
+        status: rec?.status ?? 'in-progress',
+        confidence: rec?.confidence,
+        minutesSpent: rec?.minutesSpent,
+        completedAt: rec?.completedAt,
+        notes: newBody,
+        contentId,
+        resumeSeconds: parsed.seconds,
+      });
+    } catch (e) {
+      alert('Failed to save resume point: ' + String(e));
+    }
+  }
+
   return (
     <div>
       <button onClick={onBack}>← back</button>
@@ -218,6 +330,9 @@ function TrackDetail({
             {items.map((item) => {
               const rec = byItem.get(item.id);
               const done = rec?.status === 'completed';
+              const isVideo = item.kind === 'video' && !!item.url;
+              const resumeSeconds = rec?.resumeSeconds;
+              const href = isVideo && resumeSeconds != null ? withTimestamp(item.url!, resumeSeconds) : item.url;
               return (
                 <li key={item.id} class={done ? 'item done' : 'item'}>
                   <input
@@ -248,12 +363,33 @@ function TrackDetail({
                   <span class={`kind kind-${item.kind}`}>{item.kind}</span>
                   <span class="item-title">
                     {item.url ? (
-                      <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+                      <a href={href} target="_blank" rel="noreferrer">{item.title}</a>
                     ) : (
                       item.title
                     )}
                     {item.access && ACCESS_LABEL[item.access] && (
                       <> <span class={`access access-${item.access}`} title={ACCESS_HINT[item.access]}>{ACCESS_LABEL[item.access]}</span></>
+                    )}
+                    {isVideo && (
+                      <><br />
+                        <span class="resume-row">
+                          {resumeSeconds != null && (
+                            <a
+                              class="resume-chip"
+                              href={withTimestamp(item.url!, resumeSeconds)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open the video at your saved resume time"
+                            >▶ {fmtTime(resumeSeconds)}</a>
+                          )}
+                          <button
+                            class="resume-btn"
+                            type="button"
+                            onClick={() => setResume(item)}
+                            title='Copy a YouTube link at the current time (Share → "Start at", or right-click → "Copy video URL at current time"), then tap this to save your resume point.'
+                          >{resumeSeconds != null ? 'update resume point' : 'set resume point'}</button>
+                        </span>
+                      </>
                     )}
                     {item.notes && <><br /><span class="dim">{item.notes}</span></>}
                   </span>

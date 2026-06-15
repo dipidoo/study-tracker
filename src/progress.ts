@@ -14,6 +14,10 @@ export interface ProgressRecord {
   minutesSpent?: number;
   completedAt?: string;
   notes?: string;
+  /** GitHub DraftIssue content id (distinct from the ProjectV2 item id) — needed to edit the body. */
+  contentId?: string;
+  /** Video resume position in seconds, stored in the DraftIssue body. */
+  resumeSeconds?: number;
 }
 
 export interface ProjectMeta {
@@ -106,7 +110,7 @@ interface ProgressItemsPage {
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
       nodes: Array<{
         id: string;
-        content?: { body?: string };
+        content?: { id?: string; body?: string };
         fieldValues: {
           nodes: Array<{
             field?: { id: string; name?: string };
@@ -134,7 +138,7 @@ export async function listProgress(token: string, meta: ProjectMeta): Promise<Pr
                pageInfo { hasNextPage endCursor }
                nodes {
                  id
-                 content { ... on DraftIssue { body } }
+                 content { ... on DraftIssue { id body } }
                  fieldValues(first: 20) {
                    nodes {
                      ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { id name } } }
@@ -155,6 +159,7 @@ export async function listProgress(token: string, meta: ProjectMeta): Promise<Pr
         item.fieldValues.nodes.find((v: { field?: { name?: string } }) => v.field?.name === name);
       const unitIdVal = byField('UnitId')?.text;
       if (!unitIdVal) continue;
+      const body = item.content?.body;
       out.push({
         itemId: item.id,
         unitId: unitIdVal,
@@ -162,7 +167,9 @@ export async function listProgress(token: string, meta: ProjectMeta): Promise<Pr
         confidence: byField('Confidence')?.name?.toLowerCase() as Confidence | undefined,
         minutesSpent: byField('MinutesSpent')?.number,
         completedAt: byField('CompletedAt')?.date,
-        notes: item.content?.body,
+        notes: body,
+        contentId: item.content?.id,
+        resumeSeconds: parseResumeSeconds(body),
       });
     }
     if (!data.node.items.pageInfo.hasNextPage) break;
@@ -187,17 +194,19 @@ export async function upsertProgress(
   existingItemId?: string,
 ): Promise<ProgressRecord> {
   let itemId = existingItemId;
+  let contentId: string | undefined;
   if (!itemId) {
-    const created = await ghGraphQL<{ addProjectV2DraftIssue: { projectItem: { id: string } } }>(
+    const created = await ghGraphQL<{ addProjectV2DraftIssue: { projectItem: { id: string; content?: { id?: string } } } }>(
       token,
       `mutation($projectId: ID!, $title: String!, $body: String) {
          addProjectV2DraftIssue(input: { projectId: $projectId, title: $title, body: $body }) {
-           projectItem { id }
+           projectItem { id content { ... on DraftIssue { id } } }
          }
        }`,
       { projectId: meta.projectId, title, body: patch.notes ?? '' },
     );
     itemId = created.addProjectV2DraftIssue.projectItem.id;
+    contentId = created.addProjectV2DraftIssue.projectItem.content?.id;
     await setText(token, meta.projectId, itemId, meta.fields.unitId, unitId);
     await setText(token, meta.projectId, itemId, meta.fields.course, courseCode);
   }
@@ -227,6 +236,7 @@ export async function upsertProgress(
     minutesSpent: patch.minutesSpent,
     completedAt: patch.completedAt,
     notes: patch.notes,
+    contentId,
   };
 }
 
@@ -268,4 +278,51 @@ async function setDate(token: string, projectId: string, itemId: string, fieldId
      }`,
     { projectId, itemId, fieldId, value },
   );
+}
+
+// ---- Video resume timestamps ----
+// Stored inside the progress item's DraftIssue body as a `resume-at: <n>s` line,
+// so no extra ProjectV2 board field is required and it syncs across devices like
+// the rest of progress.
+
+const RESUME_LINE = /resume-at:\s*(\d+)s?/i;
+
+export function parseResumeSeconds(body?: string): number | undefined {
+  if (!body) return undefined;
+  const m = body.match(RESUME_LINE);
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+function setResumeInBody(body: string | undefined, seconds: number): string {
+  const rest = (body ?? '').replace(RESUME_LINE, '').replace(/\n{2,}/g, '\n').trim();
+  const line = `resume-at: ${seconds}s`;
+  return rest ? `${rest}\n${line}` : line;
+}
+
+/** Resolve the DraftIssue content id for a ProjectV2 item (needed to edit its body). */
+export async function getDraftContentId(token: string, projectItemId: string): Promise<string | undefined> {
+  const data = await ghGraphQL<{ node?: { content?: { id?: string } } }>(
+    token,
+    `query($id: ID!) { node(id: $id) { ... on ProjectV2Item { content { ... on DraftIssue { id } } } } }`,
+    { id: projectItemId },
+  );
+  return data.node?.content?.id;
+}
+
+/** Persist a video resume position into the progress record's DraftIssue body. Returns the new body. */
+export async function saveResumePoint(
+  token: string,
+  contentId: string,
+  seconds: number,
+  existingBody?: string,
+): Promise<string> {
+  const body = setResumeInBody(existingBody, seconds);
+  await ghGraphQL(
+    token,
+    `mutation($id: ID!, $body: String!) {
+       updateProjectV2DraftIssue(input: { draftIssueId: $id, body: $body }) { draftIssue { id } }
+     }`,
+    { id: contentId, body },
+  );
+  return body;
 }
