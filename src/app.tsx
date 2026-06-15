@@ -46,6 +46,40 @@ function parseClipboardTimestamp(text: string): { videoId?: string; seconds: num
   return { videoId: extractVideoId(text), seconds };
 }
 
+// Parse a manually typed time: mm:ss, h:mm:ss, or token forms like 1h2m3s / 12m / 90s / 754.
+function parseTypedTime(s: string): number | null {
+  const colon = s.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (colon) {
+    const a = Number(colon[1]);
+    const b = Number(colon[2]);
+    const c = colon[3] != null ? Number(colon[3]) : null;
+    if (c == null) return b > 59 ? null : a * 60 + b; // mm:ss
+    return b > 59 || c > 59 ? null : a * 3600 + b * 60 + c; // h:mm:ss
+  }
+  return parseTimeToken(s);
+}
+
+// Manual-entry fallback: accept a typed time, or a pasted link / share text that carries a timestamp.
+function parseManualEntry(input: string): number | null {
+  const s = input.trim();
+  if (!s) return null;
+  const fromUrl = parseClipboardTimestamp(s);
+  if (fromUrl) return fromUrl.seconds;
+  return parseTypedTime(s);
+}
+
+// Prompt for a resume time (typed or pasted link). Returns seconds, or null if cancelled/invalid.
+function promptResumeTime(): number | null {
+  const input = prompt('Enter a time to resume from — e.g. 12:34, 1:02:03, or 12m34s. You can also paste a video link that has a timestamp.');
+  if (input == null) return null; // cancelled
+  const secs = parseManualEntry(input);
+  if (secs == null) {
+    alert(`Could not read "${input}" as a time. Use mm:ss, h:mm:ss, or forms like 12m34s / 90s.`);
+    return null;
+  }
+  return secs;
+}
+
 // Append/replace the YouTube resume time on a URL, preserving list & index params.
 function withTimestamp(url: string, seconds: number): string {
   try {
@@ -256,25 +290,35 @@ function TrackDetail({
     grouped.get(sec)!.push(item);
   }
 
-  // Read a YouTube "copy link at current time" from the clipboard and save it as the resume point.
+  // Save a resume point for a video. Prefers a YouTube "copy link at current time"
+  // from the clipboard; if the clipboard has no usable timestamp (or can't be read),
+  // falls back to letting the user type a time manually.
   async function setResume(item: TrackItem) {
     if (!track || !item.url) return;
-    let text = '';
+
+    let clip = '';
     try {
-      text = await navigator.clipboard.readText();
+      clip = await navigator.clipboard.readText();
     } catch {
-      alert('Could not read the clipboard. On the video use "Share → Copy" with the start time checked, then tap "set resume point" again.');
-      return;
+      clip = ''; // clipboard blocked or empty — fall through to manual entry
     }
-    const parsed = parseClipboardTimestamp(text);
-    if (!parsed) {
-      alert('No timestamp found in the clipboard. On YouTube, tick "Start at" in the Share dialog (or right-click the video → "Copy video URL at current time"), then tap "set resume point" again.');
-      return;
+    const fromClip = parseClipboardTimestamp(clip);
+
+    let seconds: number | null;
+    if (fromClip) {
+      const vid = extractVideoId(item.url);
+      const mismatch = !!(vid && fromClip.videoId && vid !== fromClip.videoId);
+      if (mismatch && !confirm('The clipboard link is a different video than this item. Save its timestamp here anyway? (Cancel to type a time instead.)')) {
+        seconds = promptResumeTime();
+      } else {
+        seconds = fromClip.seconds;
+      }
+    } else {
+      // Nothing useful in the clipboard — let the user type a timestamp.
+      seconds = promptResumeTime();
     }
-    const vid = extractVideoId(item.url);
-    if (vid && parsed.videoId && vid !== parsed.videoId) {
-      if (!confirm('The clipboard link is a different video than this item. Save the timestamp here anyway?')) return;
-    }
+    if (seconds == null) return; // cancelled or unparseable
+
     if (!state.meta) {
       alert(`ProjectV2 board "${state.config.projectPrefix}progress" not found. Create it first to save progress.`);
       return;
@@ -300,7 +344,7 @@ function TrackDetail({
         alert('Could not locate the progress record to save into.');
         return;
       }
-      const newBody = await saveResumePoint(state.token, contentId, parsed.seconds, rec?.notes);
+      const newBody = await saveResumePoint(state.token, contentId, seconds, rec?.notes);
       onApplyPatch({
         itemId,
         unitId: item.id,
@@ -310,7 +354,7 @@ function TrackDetail({
         completedAt: rec?.completedAt,
         notes: newBody,
         contentId,
-        resumeSeconds: parsed.seconds,
+        resumeSeconds: seconds,
       });
     } catch (e) {
       alert('Failed to save resume point: ' + String(e));
@@ -386,7 +430,7 @@ function TrackDetail({
                             class="resume-btn"
                             type="button"
                             onClick={() => setResume(item)}
-                            title='Copy a YouTube link at the current time (Share → "Start at", or right-click → "Copy video URL at current time"), then tap this to save your resume point.'
+                            title='Reads a copied YouTube link with a timestamp (Share → "Start at", or right-click → "Copy video URL at current time"). If the clipboard has none, you can type a time like 12:34.'
                           >{resumeSeconds != null ? 'update resume point' : 'set resume point'}</button>
                         </span>
                       </>
